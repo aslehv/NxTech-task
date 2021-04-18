@@ -1,18 +1,18 @@
 import numpy as np
-from scipy import stats
-import matplotlib.pyplot as plt
 import time as tm
 import random
+import datetime
 import csv
-import math
-from statsmodels.graphics.gofplots import qqplot
-import statsmodels.api as sm
-import pandas as pd
+import requests
 
-gatherIntervalInMin = 0.2
+
+gatherIntervalInMin = 2
 lastTime = 0
 filePath = "temperature.txt"
 bits = 4096
+url = "http://localhost:5000/api/temperature"
+errorUrl = "http://localhost:5000/api/temperature/missing"
+
 
 def readTemperature(filePath, time):
     global lastTime
@@ -32,14 +32,15 @@ def convertToC(inVal):
     out = (inVal/bits)*100-50
     return out
 
-def gatherTwoMin():
-    startTime = tm.time()
+def gatherData():
+    startSec = tm.time()
+    startTime = datetime.datetime.utcnow().isoformat()
     data = []
-    while tm.time() < syfjtartTime+gatherIntervalInMin*60:
+    while tm.time() < startSec+gatherIntervalInMin*60:
         currentTemp = readTemperature(filePath, tm.time())
         if(currentTemp is not None):
             data.append(convertToC(currentTemp))
-    return data
+    return data, startTime, datetime.datetime.utcnow().isoformat()
 
 def calcMaxMinAvg(data):
     max = np.max(data)
@@ -47,12 +48,53 @@ def calcMaxMinAvg(data):
     avg = np.mean(data)
     return max, min, avg
 
-#print(calcMaxMinAvg(gatherTwoMin()))
+def httpPost(payload, url):
+    request = requests.post(url, json=payload)
+    return request.status_code
+def jsonMaker(max,min,avg,startTime,endTime):
+    data = {
+            "time": {
+                    "start": str(startTime),
+                    "end": str(endTime)
+            },
+            "min": np.round(float(min), 2),
+            "max": np.round(float(max), 2),
+            "avg": np.round(float(avg), 2)
+    }
+    return data
+def archiver(jsonval, archive):
+    if(len(archive) > 9):
+        archive.pop(0)
+    archive.append(jsonval)
+    return archive
+    #print(archive, "len: ", len(archive))
 
+def main():
+    archive = []
+    lastOK = 0
+    while True:
+        data, startTime, endTime = gatherData()
+        max, min, avg = calcMaxMinAvg(data)
+        jsonval = jsonMaker(max,min,avg,startTime,endTime)
+        archive = archiver(jsonval, archive)
 
-#print(gatherTwoMin(tm.time()))
-#tmpVal = readTemperature("temperature.txt", tm.time())
-#print(tmpVal)
-#tm.sleep(0.08)
-#tmpVal1 = readTemperature("temperature.txt", tm.time())
-#print(tmpVal1)
+        if lastOK >= 1:
+            newReq = httpPost(archive[-1], url)
+            print("Last failed, sending it now.")
+            if newReq != 200:
+                errpost = httpPost(archive, errorUrl)
+                print("Resend failed, sending last 10 to alternative server.")
+            else:
+                print("Resend succesful!")
+        post = httpPost(jsonval, url)
+        #print(post)
+        if post != 200:
+            lastOK += 1
+            print("Send failed, resending next round")
+        else:
+            lastOK = 0
+            print("Data succesfully sent!")
+        #print("archive length: ", len(archive))
+        #print("lastOK counter:", lastOK)
+
+main()
