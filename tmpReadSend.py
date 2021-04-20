@@ -6,17 +6,15 @@ import csv
 import requests
 
 
-gatherIntervalInMin = 2
-lastTime = 0
-filePath = "temperature.txt"
-bits = 4096
-url = "http://localhost:5000/api/temperature"
-errorUrl = "http://localhost:5000/api/temperature/missing"
+gatherIntervalInMin = 2 #For how many minutes should data be gathered each round
+filePath = "temperature.txt" #Path to file for temperature reading
+bits = 4096 #ADC resolution
+url = "http://localhost:5000/api/temperature" #URL to REST API
+errorUrl = "http://localhost:5000/api/temperature/missing" #URL to backup server on fail
+lastTime = 0 #global var for readTemperature function
 
-
-def readTemperature(filePath, time):
+def readTemperature(filePath, time): #Reads random temp value from file and returns float
     global lastTime
-    global cntr
     if(time < lastTime + 0.1 and lastTime != 0):
         #print("last read less than 100ms ago ")
         exit;
@@ -28,11 +26,11 @@ def readTemperature(filePath, time):
         lastTime = tm.time()
         return float(tmpVal)
 
-def convertToC(inVal):
+def convertToC(inVal): #converts value from readTemperature to Celsius where temp is 0+- 50C
     out = (inVal/bits)*100-50
     return out
 
-def gatherData():
+def gatherData(): #Gather data to list for defined amount of minutes
     startSec = tm.time()
     startTime = datetime.datetime.utcnow().isoformat()
     data = []
@@ -42,16 +40,16 @@ def gatherData():
             data.append(convertToC(currentTemp))
     return data, startTime, datetime.datetime.utcnow().isoformat()
 
-def calcMaxMinAvg(data):
+def calcMaxMinAvg(data): #Return max, min and average from list input.
     max = np.max(data)
     min = np.min(data)
     avg = np.mean(data)
     return max, min, avg
 
-def httpPost(payload, url):
+def httpPost(payload, url): #Post data to url as defined return status code
     request = requests.post(url, json=payload)
     return request.status_code
-def jsonMaker(max,min,avg,startTime,endTime):
+def jsonMaker(max,min,avg,startTime,endTime): #Create object ready for json POST
     data = {
             "time": {
                     "start": str(startTime),
@@ -62,14 +60,14 @@ def jsonMaker(max,min,avg,startTime,endTime):
             "avg": np.round(float(avg), 2)
     }
     return data
-def archiver(jsonval, archive):
+def archiver(jsonval, archive): #Keeps archive at max 10, adds latest reading.
     if(len(archive) > 9):
         archive.pop(0)
     archive.append(jsonval)
     return archive
     #print(archive, "len: ", len(archive))
 
-def main():
+def main(): #starts and runs the program in a while loop. Error handling included.
     archive = []
     lastOK = 0
     while True:
